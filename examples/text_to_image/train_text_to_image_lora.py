@@ -13,7 +13,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Fine-tuning script for Stable Diffusion for text2image with support for LoRA."""
+"""
+Fine-tuning script for Stable Diffusion for text2image with support for LoRA.
+
+You can start training as follows:
+```
+accelerate launch train_text_to_image_lora.py --pretrained_model_name_or_path /home/pvougiou/storage/pvougiou/checkpoints/stable-diffusion-2-1 --train_data_dir /home/pvougiou/Dropbox/PycharmProjects/stable_diffusion/Stitch_data --center_crop --random_flip --train_batch_size 2 --gradient_accumulation_steps 4 --learning_rate 1e-4 --lr_scheduler "constant" --lr_warmup_steps 0 --output_dir "/storage/pvougiou/sd-stitch-model" --gradient_checkpointing --mixed_precision "fp16" --resolution 256 --max_train_steps 16000
+```
+
+"""
 
 import argparse
 import logging
@@ -459,6 +467,8 @@ def main():
     # freeze parameters of models to save more memory
     unet.requires_grad_(False)
     vae.requires_grad_(False)
+    # This needs to be commented-in in case `stable-diffusion-xl-base-1.0` is used as `pretrained_model_name_or_path`.
+    # unet.config.addition_embed_type = None
     text_encoder.requires_grad_(False)
 
     # For mixed precision training we cast all non-trainable weights (vae, non-lora text_encoder and non-lora unet) to half-precision
