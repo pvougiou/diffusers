@@ -18,7 +18,7 @@ Fine-tuning script for Stable Diffusion for text2image with support for LoRA.
 
 You can start training as follows:
 ```
-accelerate launch train_text_to_image_lora.py --pretrained_model_name_or_path /home/pvougiou/storage/pvougiou/checkpoints/stable-diffusion-2-1 --train_data_dir /home/pvougiou/Dropbox/PycharmProjects/stable_diffusion/Stitch_data --center_crop --random_flip --train_batch_size 2 --gradient_accumulation_steps 4 --learning_rate 1e-4 --lr_scheduler "constant" --lr_warmup_steps 0 --output_dir "/storage/pvougiou/sd-stitch-model" --gradient_checkpointing --mixed_precision "fp16" --resolution 256 --max_train_steps 16000
+accelerate launch train_text_to_image_lora.py --pretrained_model_name_or_path /home/pvougiou/storage/pvougiou/checkpoints/stable-diffusion-2-1 --train_data_dir /home/pvougiou/Dropbox/PycharmProjects/stable_diffusion/Stitch_data --center_crop --random_flip --train_batch_size 2 --gradient_accumulation_steps 4 --learning_rate 1e-4 --lr_scheduler "constant" --lr_warmup_steps 0 --output_dir "/storage/pvougiou/sd-stitch-model" --gradient_checkpointing --mixed_precision "fp16" --resolution 768 --max_train_steps 20000 --rank 256
 ```
 
 """
@@ -742,6 +742,8 @@ def main():
     for epoch in range(first_epoch, args.num_train_epochs):
         unet.train()
         train_loss = 0.0
+        accum_train_loss = 0.0
+
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(unet):
                 # Convert images to latent space
@@ -805,7 +807,7 @@ def main():
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
                 train_loss += avg_loss.item() / args.gradient_accumulation_steps
-
+                accum_train_loss += avg_loss.detach().item()
                 # Backpropagate
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
@@ -910,7 +912,7 @@ def main():
 
                 del pipeline
                 torch.cuda.empty_cache()
-
+        logger.info(f"Accumulated {accum_train_loss=}")
     # Save the lora layers
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
