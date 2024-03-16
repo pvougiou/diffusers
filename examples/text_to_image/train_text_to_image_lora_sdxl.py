@@ -13,7 +13,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Fine-tuning script for Stable Diffusion XL for text2image with support for LoRA."""
+"""
+Fine-tuning script for Sttable Diffusion XL for text2image with support for LoRA.
+
+You can start training as follows:
+```
+accelerate launch train_text_to_image_lora_sdxl.py --pretrained_model_name_or_path /home/pvougiou/storage/pvougiou/checkpoints/stable-diffusion-xl-base-1.0 --train_data_dir /home/pvougiou/Dropbox/PycharmProjects/stable_diffusion/Stitch_data --center_crop --random_flip --train_batch_size 2 --gradient_accumulation_steps 4 --learning_rate 1e-4 --lr_scheduler "constant" --lr_warmup_steps 0 --output_dir "/storage/pvougiou/sd-stitch-model" --gradient_checkpointing --mixed_precision "fp16" --max_train_steps 16000 --rank 256
+```
+
+"""
 
 import argparse
 import logging
@@ -1013,6 +1021,7 @@ def main(args):
             text_encoder_one.train()
             text_encoder_two.train()
         train_loss = 0.0
+        accum_train_loss = 0.0
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(unet):
                 # Convert images to latent space
@@ -1109,7 +1118,7 @@ def main(args):
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
                 train_loss += avg_loss.item() / args.gradient_accumulation_steps
-
+                accum_train_loss += avg_loss.detach().item()
                 # Backpropagate
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
@@ -1157,6 +1166,7 @@ def main(args):
             if global_step >= args.max_train_steps:
                 break
 
+        logger.info(f"Accumulated {accum_train_loss=}")
         if accelerator.is_main_process:
             if args.validation_prompt is not None and epoch % args.validation_epochs == 0:
                 logger.info(
