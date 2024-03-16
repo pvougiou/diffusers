@@ -18,7 +18,7 @@ Fine-tuning script for Stable Diffusion for text2image with support for LoRA.
 
 You can start training as follows:
 ```
-accelerate launch train_text_to_image_lora.py --pretrained_model_name_or_path /home/pvougiou/storage/pvougiou/checkpoints/stable-diffusion-2-1 --train_data_dir /home/pvougiou/Dropbox/PycharmProjects/stable_diffusion/Stitch_data --center_crop --random_flip --train_batch_size 2 --gradient_accumulation_steps 4 --learning_rate 1e-4 --lr_scheduler "constant" --lr_warmup_steps 0 --output_dir "/storage/pvougiou/sd-stitch-model" --gradient_checkpointing --mixed_precision "fp16" --resolution 768 --max_train_steps 20000 --rank 256
+accelerate launch train_text_to_image_lora.py --pretrained_model_name_or_path /home/pvougiou/storage/pvougiou/checkpoints/stable-diffusion-2-1 --train_data_dir /home/pvougiou/Dropbox/PycharmProjects/stable_diffusion/Stitch_data --center_crop --random_flip --train_batch_size 4 --gradient_accumulation_steps 8 --learning_rate 1e-4 --lr_scheduler "constant" --lr_warmup_steps 0 --output_dir "/storage/pvougiou/sd-stitch-model" --gradient_checkpointing --mixed_precision "fp16" --resolution 768 --max_train_steps 20000 --rank 384
 ```
 
 """
@@ -64,6 +64,21 @@ check_min_version("0.27.0.dev0")
 
 logger = get_logger(__name__, log_level="INFO")
 
+
+def dump_val_images(images: list, save_path_dir: str, validation_prompt: str):
+    """
+    Function for dumping images that are generated during prompt validation round.
+    :param images: list of images to be dumped
+    :param save_path_dir: str path to save
+    :param validation_prompt: str of the used validation prompt
+    :return:
+    """
+    save_path_dir = os.path.join(save_path_dir, "val_images")
+    if not os.path.exists(save_path_dir):
+        os.mkdir(save_path_dir)
+    for image_idx, image in enumerate(images):
+        img_name = os.path.join(save_path_dir, f"{'_'.join(validation_prompt.split()[:8])}__{image_idx}.png")
+        image.save(img_name)
 
 def save_model_card(
     repo_id: str,
@@ -862,56 +877,49 @@ def main():
 
                         logger.info(f"Saved state to {save_path}")
 
+                        if args.validation_prompt is not None:
+                            logger.info(
+                                f"Running validation... \n Generating {args.num_validation_images} images with prompt:"
+                                f" {args.validation_prompt}."
+                            )
+                            # create pipeline
+                            pipeline = DiffusionPipeline.from_pretrained(
+                                args.pretrained_model_name_or_path,
+                                unet=unwrap_model(unet),
+                                revision=args.revision,
+                                variant=args.variant,
+                                torch_dtype=weight_dtype,
+                            )
+                            pipeline = pipeline.to(accelerator.device)
+                            pipeline.set_progress_bar_config(disable=True)
+
+                            # run inference
+                            generator = torch.Generator(device=accelerator.device)
+                            if args.seed is not None:
+                                generator = generator.manual_seed(args.seed)
+                            images = []
+                            with torch.cuda.amp.autocast():
+                                for _ in range(args.num_validation_images):
+                                    images.append(
+                                        pipeline(args.validation_prompt, num_inference_steps=30,
+                                                 generator=generator).images[0]
+                                    )
+
+                            dump_val_images(
+                                images=images,
+                                save_path_dir=save_path,
+                                validation_prompt=args.validation_prompt
+                            )
+
+                            del pipeline
+                            torch.cuda.empty_cache()
+
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
 
             if global_step >= args.max_train_steps:
                 break
 
-        if accelerator.is_main_process:
-            if args.validation_prompt is not None and epoch % args.validation_epochs == 0:
-                logger.info(
-                    f"Running validation... \n Generating {args.num_validation_images} images with prompt:"
-                    f" {args.validation_prompt}."
-                )
-                # create pipeline
-                pipeline = DiffusionPipeline.from_pretrained(
-                    args.pretrained_model_name_or_path,
-                    unet=unwrap_model(unet),
-                    revision=args.revision,
-                    variant=args.variant,
-                    torch_dtype=weight_dtype,
-                )
-                pipeline = pipeline.to(accelerator.device)
-                pipeline.set_progress_bar_config(disable=True)
-
-                # run inference
-                generator = torch.Generator(device=accelerator.device)
-                if args.seed is not None:
-                    generator = generator.manual_seed(args.seed)
-                images = []
-                with torch.cuda.amp.autocast():
-                    for _ in range(args.num_validation_images):
-                        images.append(
-                            pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
-                        )
-
-                for tracker in accelerator.trackers:
-                    if tracker.name == "tensorboard":
-                        np_images = np.stack([np.asarray(img) for img in images])
-                        tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
-                    if tracker.name == "wandb":
-                        tracker.log(
-                            {
-                                "validation": [
-                                    wandb.Image(image, caption=f"{i}: {args.validation_prompt}")
-                                    for i, image in enumerate(images)
-                                ]
-                            }
-                        )
-
-                del pipeline
-                torch.cuda.empty_cache()
         logger.info(f"Accumulated {accum_train_loss=}")
     # Save the lora layers
     accelerator.wait_for_everyone()
