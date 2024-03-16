@@ -18,7 +18,7 @@ Fine-tuning script for Stable Diffusion for text2image with support for LoRA.
 
 You can start training as follows:
 ```
-accelerate launch train_text_to_image_lora.py --pretrained_model_name_or_path /home/pvougiou/storage/pvougiou/checkpoints/stable-diffusion-2-1 --train_data_dir /home/pvougiou/Dropbox/PycharmProjects/stable_diffusion/Stitch_data --center_crop --random_flip --train_batch_size 4 --gradient_accumulation_steps 8 --learning_rate 1e-4 --lr_scheduler "constant" --lr_warmup_steps 0 --output_dir "/storage/pvougiou/sd-stitch-model" --gradient_checkpointing --mixed_precision "fp16" --resolution 768 --max_train_steps 20000 --rank 384
+accelerate launch train_text_to_image_lora.py --pretrained_model_name_or_path /home/pvougiou/storage/pvougiou/checkpoints/stable-diffusion-2-1 --train_data_dir /home/pvougiou/Dropbox/PycharmProjects/stable_diffusion/Stitch_data --center_crop --random_flip --train_batch_size 4 --gradient_accumulation_steps 4 --learning_rate 1e-4 --lr_scheduler "constant" --lr_warmup_steps 0 --output_dir "/storage/pvougiou/sd-stitch-model" --gradient_checkpointing --mixed_precision "fp16" --resolution 768 --max_train_steps 20000 --rank 384 --validation_prompt "Stitch cycling happily"
 ```
 
 """
